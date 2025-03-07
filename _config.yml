@@ -1,6 +1,6 @@
 title: My Tech Blog
 # uncomment baseurl if you want to publish the site to a subfolder
-#baseurl: /blog
+baseurl: /blog
 description: Something interesting
 exclude:
 - LICENSE
@@ -13,6 +13,7 @@ asciidoctor:
   base_dir: :docdir
   safe: unsafe
   attributes:
+    baseurl: "/blog"
     icons: font
     idseparator: _
     stylesdir: css

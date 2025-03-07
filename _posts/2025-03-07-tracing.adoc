@@ -1,5 +1,5 @@
 = Tracing a Distributed System with Rust, OpenTelemetry and Axum
-:imagesdir: /assets/tracing
+:imagesdir: {baseurl}/assets/tracing
 :source-highlighter: highlight.js
 :showtitle:
 :page-navtitle: Tracing a Distributed System with Rust, OpenTelemetry and Axum
