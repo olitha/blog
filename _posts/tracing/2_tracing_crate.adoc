@@ -1,0 +1,29 @@
+== The tracing crate
+
+To get a better understanding of tracing I want to explain some pieces of it.
+
+We have already seen tracing in action. 
+Back then it was configured with a single https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/struct.Subscriber.html[Fmt Subscriber]. We did this with the shorthand `tracing_subscriber::fmt::init()``
+
+By this we installed a global *subscriber* to trace events. In this case the subscriber writes all the events to stdout.
+
+The standard usage of tracing is to have one global subscriber installed. But having only one subscriber that gets all the events would limit the handling of events. Therefore the _tracing_subscriber_ crate has the concept of *Layers*. These layers can be composed to handle trace events.
+
+The layers can e.g. determine if an event is processed. Take a look at the https://docs.rs/tracing-subscriber/latest/tracing_subscriber/layer/trait.Layer.html#method.event_enabled[Layer::event_enabled] function for that. The note here is especially interesting for the concept of Layers. Also note that there is a *Filter* trait that is meant to filter per layer. 
+
+So Layers enable us to handle events and be able to e.g. both write to stdout and to a file. Because each Layer can do something else with the event. This becomes important when we look at the interplay of tracing with OTel later.
+
+We need a Subscriber that can handle layers as they are defined in the trait contract. _tracing_subscriber_ provides the https://docs.rs/tracing-subscriber/latest/tracing_subscriber/registry/struct.Registry.html[Registry] for that. It implements the *Subscriber* trait and can handle layers out of the box.
+
+We can install the Registry as global subscriber with the FmtLayer and a Filter like so
+[source,rust]
+----
+tracing_subscriber::registry()
+  .with(tracing_subscriber::fmt::layer())
+  .with(filter)
+  .init();
+----
+
+The _filter_ here is also a Layer that does event Filtering.
+
+That concludes our tour of the tracing crate. Let's continue to connect it to OpenTelemetry.

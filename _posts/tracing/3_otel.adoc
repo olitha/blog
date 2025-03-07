@@ -1,0 +1,62 @@
+== OpenTelemetry
+
+
+OpenTelemetry (OTel) is a Spec and Framework for Distributed tracing, metrics, logs.
+
+We only consider the tracing part here.
+
+What does this mean? The OTel Spec defines the parts of the SDK independently of the implementation language. You can find the Tracing SDK https://opentelemetry.io/docs/specs/otel/trace/sdk[here]
+
+The advantage is therefore that the concepts and implementations in the different programming
+programming languages should not differ significantly. This considerably reduces the effort for the developer.
+
+The OpenTelemetry Protocol (OTLP) for communication with the tracing backend is also defined.
+https://opentelemetry.io/docs/specs/otlp[here]
+
+The OTLP definition enables backends to understand all traces sent by an OTel implementation.
+
+
+== OTel in Rust
+
+First it may be hard to find your way around the OTel Implementation although it isn't.
+
+
+=== The crates
+
+OTel Implementation is separated in multiple crates. 
+The parts are congruent to the https://opentelemetry.io/docs/specs/otel[OTel Spec]. 
+
+image::otel_crates.png[]
+
+* https://docs.rs/opentelemetry/latest/opentelemetry/index.html[OpenTelemetry] the API
+* https://docs.rs/opentelemetry_sdk/latest/opentelemetry_sdk/index.html[OpenTelemetry SDK] the SDK
+* https://docs.rs/opentelemetry-otlp/latest/opentelemetry_otlp/index.html[OpenTelemetry Protocol] OTLP https://opentelemetry.io/docs/specs/otlp/
+* https://docs.rs/opentelemetry-semantic-conventions/0.28.0/opentelemetry_semantic_conventions/[OpenTelemtetry Semantic Conventions] Defintions of attributes https://opentelemetry.io/docs/specs/semconv/
+
+It is important to understand that the tracing crate has nothing to do with OTel. It is concerned about spans and events.
+
+The following is supposed to give an overview over the components that are important for us.
+
+image::otel_components.png[]
+
+
+=== Connecting Tracing Crate to OTel
+
+As we have seen tracing is not aware of how the traces are logged out or where they are written to.
+
+To bridge this the https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/index.html[tracing_opentelemetry] crate is available.
+The crates provides a tracing layer that can be added to a subscriber like we did with the Fmt Layer before.
+
+All this talking boils then down to this code
+[source,rust]
+----
+ let telemetry = tracing_opentelemetry::layer().with_tracer(tracer_provider.clone().tracer("app tracer"));
+    
+tracing_subscriber::registry()
+  .with(telemetry)
+  .init();
+----
+
+We get an OTel Tracer from the OTel TracerProvider and set it in the Tracing OpenTelemetryLayer.
+It is important to keep these things separate. The OpenTelemetryLayer is a tracing Layer whereas the TracerProvider and Tracer are coming from OTel.
+

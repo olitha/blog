@@ -1,0 +1,214 @@
+== Tracing inter-service calls in Rust
+
+Now we finally have all the parts to start implementing our 2 Applications.
+
+We will have 2 Binaries
+
+Client:: starts the distributed tracing context and call the other service
+API-Gateway:: receives the call and continues the tracing context
+
+Both Applications are configured to use a Jaeger Tracing Backend that can then show the complete trace.
+
+
+=== The Client
+One Application has to start the tracing. In our case that is a client application, that calls another service.
+
+Much code will be the same in Client and API-Gateway so we will go through them first here.
+
+First thing from bottom-up is the OTel side. As you remember we need a Tracer created by a TracerProvider.
+So let's create a TracerProvider.
+
+[source,rust]
+----
+fn batch_with_processor() -> SdkTracerProvider {
+    let span_exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .build()
+        .expect("Error spanexporter");
+    let batch = opentelemetry_sdk::trace::BatchSpanProcessor::builder(span_exporter)
+        .with_batch_config(
+            BatchConfigBuilder::default()
+                .with_max_queue_size(4096)
+                .with_max_export_batch_size(512)
+                .build(),
+        )
+        .build();
+
+    // Then use the `with_batch_exporter` method to have the provider export spans in batches.
+    trace::SdkTracerProvider::builder()
+        .with_resource(resource())
+        .with_span_processor(batch)
+        .build()
+}
+
+fn resource() -> Resource {
+    Resource::builder_empty()
+        .with_detector(Box::new(TelemetryResourceDetector))
+        .with_service_name("Small Client")
+        .build()
+}
+----
+
+We build a TracerProvider with a SpanProcessor that exports its spans
+with a tonic (grpc) Exporter. The Resource is sent with all the traces and is a concept of OTel. Here we use a provided detector that will e.g. add the OTel lib version. In addition we set the service name that will distinguish our service in the collected traces.
+
+We then connect the Tracer we get from the TracerProvider with the *tracing* crate using the *tracing_opentelemetry* crate. and install the tracing Subscriber like discussed before.
+
+[source,rust]
+----
+ let telemetry =
+        tracing_opentelemetry::layer().with_tracer(tracer_provider.clone().tracer("app tracer"));
+
+    // The registry is a Subscriber with support of layers
+    // is is installed as the process global subscriber
+    tracing_subscriber::registry()
+        .with(telemetry)
+        .with(tracing_subscriber::fmt::layer())
+        .with(filter)
+        .init();
+----
+The filter is an EnvFilter we have seen before.
+
+=== Propagating the trace context
+What we still have to do is the http call to the other service.
+
+We use a TraceContextPropagator from the *opentelemetry_sdk* for that. It can take attributes from the OTel Context and build a correct trace header that we can put as header in our request.
+
+It can be _installed_ globally, meaning we can also get it easily for the call later. 
+[source,rust]
+----
+global::set_text_map_propagator(opentelemetry_sdk::propagation::TraceContextPropagator::new());
+----
+
+Now on to the call to the service.
+[source,rust]
+----
+ client_request().instrument(info_span!("client_request",
+            { HTTP_REQUEST_METHOD } = Empty,
+            { HTTP_RESPONSE_STATUS_CODE } = Empty
+        )).await;
+
+----
+
+[source,rust]
+----
+async fn client_request() {
+
+        let client = reqwest::Client::new();
+        let mut headers = HeaderMap::new();
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        let ctx = Span::current().context();
+        global::get_text_map_propagator(|propagator| { <1>
+            propagator.inject_context(&ctx, &mut HeaderInjector(&mut headers));
+        });
+
+        let request = client
+            .post("http://localhost:3000/event")
+            .json(&serde_json::json!({ "counter": 1}))
+            .headers(headers)
+            .build()
+            .unwrap();
+
+        Span::current().record(HTTP_REQUEST_METHOD, "POST"); <2>
+        let response = client
+            .execute(request)
+            .await
+            .unwrap();
+        Span::current().record(HTTP_RESPONSE_STATUS_CODE, response.status().as_u16()); <2>
+
+}
+----
+
+Note that in (1) we get the previously set Propagator und let it inject the OTel Context of our Span with a HeaderInjector (coming from opentelemetry_http what wasn't mentioned before) in our our empty headermap.
+
+In (2) we record Span Attributes now that we know what is our HTTP Request Method and the Response code. Also note that these attributes were set as Empty when we created the span in the call to _client_request_. Tracing needs all attributes present at span build time. You can read more about that in the tracing doc.
+
+You can find the full code link:code/client)[here]
+
+=== Api-Gateway
+
+The called service will have to read out the trace header and create a Span for it. Or better it will store this Information to send the traces with this traceid to the Tracing Backend.
+Remember *tracing* crate is not interested in this at all.
+
+We use *axum* and therefore can use *tower* Layers. For that purpose there is a already a Tower Layer in *tower_http* crate.
+
+We skip here the initialisation of the TracerProvider because this works the same as in the Client Code. As a matter of fact the only difference is that we want to get the header out and have it correctly included in OTel traces.
+
+So we crate the axum Router for our route and add a layer for that route.
+[source,rust]
+----
+ let app = Router::new().route("/event", post(body)).layer(
+        TraceLayer::new_for_http()
+            .on_request(OtelOnRequest),
+    );
+----
+
+_TraceLayer_ is the Tower Layer mentioned before. It creates a new *tracing* span. But note here that the TracingLayer is not aware of any OTel.
+
+The default behaviour of this Layer can be adapted by implementing the Logic executed when a span is created, a request is received and furthermore.
+
+The default of a make span already creates a span with attributes of the Http method and uri. So we want to keep this logic in place.
+
+Therefore we implement the OnRequest trait and set the implementation to be called on request.
+
+[source,rust]
+----
+[derive(Clone)]
+struct OtelOnRequest;
+
+impl<B> OnRequest<B> for OtelOnRequest {
+    fn on_request(&mut self, request: &Request<B>, span: &Span) {
+        let otel_context = global::get_text_map_propagator(|propagator| {
+            propagator.extract(&HeaderExtractor(request.headers()))
+        });
+        span.set_parent(otel_context);
+    }
+}
+----
+
+We read out the headers again with the _TraceContextPropagator_ as it can set and read the headers :)
+
+The OTel context is set as parent of the *tracing* Span. _tracing_opentelemetry_ provides this for us.
+
+When the span is closed this context is again taken by the https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/struct.OpenTelemetryLayer.html#impl-Layer%3CS%3E-for-OpenTelemetryLayer%3CS,+T%3E[OpenTelemetryLayer::on_close] and
+used to build an OTel Span. 
+
+== Running the code
+
+Let's see this in action.
+
+Start jaeger by using
+[source,shell]
+docker run --rm --name jaeger \
+  -e COLLECTOR_ZIPKIN_HOST_PORT=:9411 \
+  -p 6831:6831/udp \
+  -p 6832:6832/udp \
+  -p 5778:5778 \
+  -p 16686:16686 \
+  -p 4317:4317 \
+  -p 4318:4318 \
+  -p 14250:14250 \
+  -p 14268:14268 \
+  -p 14269:14269 \
+  -p 9411:9411 \
+  jaegertracing/all-in-one:1.62.0
+
+This will start a jaeger supporting multiple protocols from which we only need the https://opentelemetry.io/docs/specs/otlp/#otlpgrpc-default-port[default port for OTLP grpc] which is 4317.
+
+Tracing OTLP will connect as default to that and this is sufficient for our needs.
+
+Start the api-gateway with a cargo run. Afterwards start the client and let it finish.
+
+If you now open jaeger on your local machine in a browser with "http://localhost:16686" you can see the trace and the 2 names of the 2 services. It also shows that it ran over 4 spans.
+
+image::jaeger_overview.png[]
+
+Clicking on the trace gives you the expanded spans. Click on each span to expand it further.
+
+image::jaeger_trace.png[]
+
+== Conclusion
+
+I hope this was helpful for you as it may be helpful for me as well in the future.
+
+You can find the source code link:code/[here]

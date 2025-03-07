@@ -1,7 +1,8 @@
 = Tracing a Distributed System with Rust, OpenTelemetry and Axum
+:imagesdir: /assets/tracing
 :source-highlighter: highlight.js
 :showtitle:
-:page-navtitle: First Entry
+:page-navtitle: Tracing a Distributed System with Rust, OpenTelemetry and Axum
 :page-excerpt: Excerpt goes here.
 :page-root: ../../../
 :toc:
@@ -18,4 +19,8 @@ So I wanted to share things I learned here.
 Here we are only talking about observability as tracing. No metrics so far. although this may be a next topic. 
 
 include::tracing/1_tracing_overview.adoc[]
+include::tracing/2_tracing_crate.adoc[]
+include::tracing/3_otel.adoc[]
+include::tracing/4_services.adoc[]
+
 
