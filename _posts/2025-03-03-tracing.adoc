@@ -13,4 +13,5 @@ So I wanted to share things I learned here.
 [sidebar]
 Here we are only talking about observability as tracing. No metrics so far. although this may be a next topic. 
 
+include::tracing/1_tracing_overview.adoc[]
 

@@ -1,0 +1,144 @@
+== What is tracing?
+Every developer is aware that logging is an essential part of a program.
+
+Logging writes every log statement directly to the log. Be it file or stdout. In sequential workflows,
+the log can be read and understood clearly by the reader.
+
+However, this becomes more challenging when dealing with parallel workflows.
+By "parallel" I mean both multi-threaded or general asynchronous programming.
+
+To better understand this, let me show you an async program with logging.
+
+=== Example with log
+
+[source,rust]
+----
+async fn task() {
+    for _ in 0..2 {
+        log::info!("task");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        async {
+            log::info!("subtask");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        .await;
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .format_timestamp(None)
+        .init();
+
+    tokio::join!(task(), task());
+}
+----
+
+In this example a task starts a subtask and the task is started 2 times on the async Runtime.
+Looking at the log we see
+
+[literal]
+[INFO  log_example] task
+[INFO  log_example] task
+[INFO  log_example] subtask
+[INFO  log_example] subtask
+[INFO  log_example] task
+[INFO  log_example] task
+[INFO  log_example] subtask
+[INFO  log_example] subtask
+
+But somethings's missing here. I cannot tell which log event comes from which task.
+You could add some context information like the thread-id, or task-id into this but this wouldn't help reading the log easily.
+
+Still what is missing is context with every log event.
+
+Let's have a view on the tracing version of this program. I use the _tracing_ crate which is the standard for, yep, tracing in Rust.
+
+=== Example with tracing
+[source,rust]
+----
+async fn tracing_task() {
+    for _ in 0..2 {
+        tracing::info!("task");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        async {
+            tracing::info!("subtask");
+        }
+        .instrument(tracing::info_span!("task inner"))
+        .await;
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt::fmt().without_time().init();
+
+    tokio::join!(
+        tracing_task().instrument(tracing::info_span!("task", position = 1)),
+        tracing_task().instrument(tracing::info_span!("task", position = 2))
+    );
+}
+----
+
+The details of initialisation are not important at the moment. But as you can see we use the log macros from tracing. And every task is packaged in a Span using the instrument decorator. 
+
+How does the log look now?
+[literal]
+INFO task{position=1}: log_example: task
+INFO task{position=2}: log_example: task
+INFO task{position=2}:task inner: log_example: subtask
+INFO task{position=2}: log_example: task
+INFO task{position=1}:task inner: log_example: subtask
+INFO task{position=1}: log_example: task
+INFO task{position=1}:task inner: log_example: subtask
+INFO task{position=2}:task inner: log_example: subtask  
+
+The log output looks different.
+
+`INFO task{position=2}:task inner: log_example: subtask`
+
+This is the log output of the subtask started from task with the attribute `position=2'.
+
+That's what tracing means. Now I can trace from where the log ouput came.
+
+The Span that we created for each task and subtask bundles many log events that are connected in a hierarchy to each other. Here the hierarchy is like the call hierarchy was but it is your decision when you start a Span and which Spans are included.
+
+You see the 2 Spans from the logline above show the 2 spans "task" and "task inner" in a hierarchy. You can also see the attribute that we set when creating the task Span.
+
+Just to mention this here again, this is not a call stack but the Spans are started at you discretion.
+
+[sidebar]
+the Tasks are decorated with _instrument_. This is needed for how an async Runtime works. You should not start a span in async Code like you start it in sync Code because of the Task Scheduling on await points. Read more on this [in the tracing doc](https://docs.rs/tracing/latest/tracing/index.html#spans). 
+
+It is hard to get around async Programming in Rust. Because it is great! And you should not even try to get around it. So when you use async this introduction should have motivated you to use tracing then :) 
+
+=== What does distributed tracing?
+
+Here we looked into a single Programm and discovered how to trace the flow even in async.
+
+Rarely a Software System these days only consists of a single Programm. In Backend Systems, requests are resulting in a chain of service calls (or let's say trigger behaviour in other services) what constitutes a distributed system.
+
+How is tracing done here? Let's have a look.
+
+It should not come as a surprise: distributed tracing is what is used in distributed systems.
+I think the the concept is clear after introducing tracing and is easily transferred. 
+
+What information is needed to build a Trace over a System?
+
+We have already seen that Spans can be nested in a Hierarchy. What the callee therefore needs is the Span the caller currently is in. The callee then should create a new span with the passed span as parent.
+As it turns out Spans have an Id that the caller can send to the callee. To bundle the whole chain makes sense and that is what the trace id is good for. It stays the same for the whole chain.
+
+Thus the first service in the chain creates a trace id. It can also create a hierarchy of spans until it reaches the point where the next service is called. It passes over the traceid and span id. This goes on for every called service until the chain ends.
+
+What we have now is that every service in the chain knows the trace id, the parent span id and its own spans of course. These traces are sent to a Tracing Backend like Jaeger which then has all the information to build a visual trace. We will see this at the end.
+
+[sidebar]
+
+Passing the Trace und Span Ids is defined in a Standard, to allow different services and implementations to interoperate.
+[Trace Context](https://www.w3.org/TR/2021/REC-trace-context-1-20211123)
+
+Looks like distributed tracing has a long history and it has. You probably heard or used it before.
+
+OpenTelemetry evolved as standard for it. We will have a look to it later.
