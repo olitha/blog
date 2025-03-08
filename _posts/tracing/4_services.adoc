@@ -211,4 +211,4 @@ image::jaeger_trace.png[]
 
 I hope this was helpful for you as it may be helpful for me as well in the future.
 
-You can find the source code link:code/[here]
+You can find the source code link:https://github.com/olitha/rust-examples/tree/main/tracing[here]
