@@ -54,7 +54,7 @@
 
             <ul id="posts" class="posts nav">
                 {% for post in site.posts %}
-                <li><a href="{{ post.url | prepend:site.baseurl }}">{{ post.navtitle }}</a></li>
+                <li><a href="{{ post.url | prepend:site.baseurl }}">{{ post.navtitle }}</a> ({{ post.date | date_to_string }})</li>
                 {% endfor %}
             </ul>
 
@@ -97,7 +97,7 @@
             <hr>
             <div class="row">
                 <div class="large-12 columns">
-                    <p>le mieux est l’ennemi du bien</p>
+                    <p>Oliver Thallmair (github <a href="https://github.com/olitha">@olitha</a>)</p>
                 </div>
             </div>
         </div>
