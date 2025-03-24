@@ -1,0 +1,88 @@
+== What Tower is about
+Tower is mainly about the Tower Service trait. What is this mysterious Service trait?
+
+https://docs.rs/tower/latest/tower/index.html#overview[Read about it in the Tower Overview]
+
+A Service `call` function returns a future. Input of this future is a value of some type and it will resolve to the Output of some Type. Very general.
+
+.Listing Service Trait
+[source, rust]
+----
+pub trait Service<Request> {
+    type Response;
+    type Error;
+    type Future: Future<Output = Result<Self::Response, Self::Error>>;
+
+    // Required methods
+    fn poll_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>>;
+    
+    fn call(&mut self, req: Request) -> Self::Future;
+}
+----
+
+In <<Listing Service Trait>> you see that when you do a `call` you get back a Future. That may include calls to the inner Service's `call` and therefore resolves to a call chain. Of course each Service impl has to implement the call to its inner service for this to work.
+
+The power comes from this agreed upon convention. If you can write an impl Service that doesn't require anything from its generics (no trait bounds and no concrete types) you can call another service with its generic types.
+
+You can wrap a Service into a Service into a Service and so on and get a Service that will forward some input (called Request) through all the services. All those services must implement the Service trait. The generic types may be bound or concrete what limits the general usage of the Service.
+
+
+Be aware that the chain has to end somewhere. Like mentioned in the Tower documentation the inner Services are called *middleware*. They call their inner service. The "End Service" that don't wrap any other service are called *leaf services*. 
+
+It is therefore possible to reuse and stack those middleware Services like a Tower of services with a leaf service at the end.
+
+Notice again that there are not many constraints on the generic types. Only for the returned Future there is a trait bound. That means you are free to have any type as Request type in your Service. More on that later.
+
+Building a stack of services is done with the Tower ServiceBuilder. With it you don't stack services but layers. But layers are factory functions for the corresponding service and the ServiceBuilder builds a stack of those Services.
+
+The Layer trait `layer` function returns the Service of the Layer
+
+.Listing Layer Trait
+[source, rust]
+----
+pub trait Layer<S> {
+    type Service;
+
+    // Required method
+    fn layer(&self, inner: S) -> Self::Service;
+}
+----
+
+A ServiceBuilder is called with a chain of layers and a final service.
+As an example
+
+[source, rust]
+----
+let service = ServiceBuilder::new()
+        .layer(LayerA)
+        .layer(LayerB)
+        .service(Service);
+
+----
+
+
+What do we have until now?
+
+- A Service that wraps another Service or is executing some final operation
+- A Layer for that Service that we can use with ServiceBuilder to easily build a stack of services.
+
+The power comes from the agreed upon Service and Layer trait. When you implement these traits for a Service you can combine it with Tower ServiceBuilder with other layers to a chain. That doesn't sound bad, right? You can reuse Layers already present for your call chain.
+
+=== About the Generic Types of Service
+As there are no trait bounds on the Service trait (except the Future as mentioned) you are free to have `i32` as `Request`. But when you combine your Layer with another Layer of another `Request` type you will have to change the type for calling the inner service of course.
+
+In a layer chain the first call to a service that defines its types defines the type of the call function of the service. Inside this call chain the types can be converted.
+
+Of course if you want to do anything with the Request in your service you will have to use concrete types or if possible trait bounds on them.
+
+That is why there are generic tower layers and there are more concrete implementations.
+
+ - the generic Services can be found in the https://docs.rs/tower/latest/tower/index.html#modules[tower crate modules]
+- more concrete implementations for `http::Request<B>` Request types are in https://docs.rs/tower-http/latest/tower_http[tower-http crate]
+
+Take a look into some Services of these 2 crates. You will notice that `tower-http` Services are implemented for `http::Request`.
+
+

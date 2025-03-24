@@ -1,0 +1,20 @@
+= Using Tower Layers in hyper and reqwest Clients 
+:imagesdir: {baseurl}/assets/
+:source-highlighter: rouge
+:showtitle:
+:page-navtitle: Using Tower Layers in hyper and reqwest Clients
+:page-excerpt: 
+:page-root: ../../../
+:toc:
+
+If you already developed a Webservice in Rust you surely came across the https://docs.rs/axum/0.8.1/axum[Axum crate].
+
+Axum integrates tightly with the Rust Ecosystem. One of those parts that can be easily overlooked is the https://docs.rs/tower/latest/tower/[tower crate].
+
+The reason it may easily not paid enough attention to is that its purpose and benefit may not be clear at first. At least it wasn't for me. The benefit becomes clear only in integration with other parts.
+
+include::subpages/tower.adoc[]
+include::subpages/server-side.adoc[]
+include::subpages/client-side.adoc[]
+
+
