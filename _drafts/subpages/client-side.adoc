@@ -1,4 +1,3 @@
-:source-highlighter: highlight.js
 == Usage in Client Calls
 Where I found myself lost was in usage of Client Code. I would like to have a timeout and a retry or even a loadbalancing in a http request as well. And use the modular way Tower provides. In addition I want to have OpenTelemetry tracing in client calls with a Tower Layer.
 In a later step I want to set the tracing headers in client calls.
@@ -11,14 +10,16 @@ In Rust the most used Http clients are
 reqwest:: A high level client library 
 hyper:: a lower level http library for client and server
 
-We need to build a "Tower" with a leaf service of the client in the end.
+Therefore I will have a look how to achieve that for these 2 crates.
+
+What we need to achieve is to build a "Tower" with a leaf service of the client in the end.
 
 === How to use Tower layers with reqwest
 
-What we need is a leaf service that can execute reqwest requests. Oh wait that's easy :-)
+What we need is a leaf service that can execute reqwest requests. Oh wait that's easy icon:smile-o[]
 If you take a good look at the https://docs.rs/reqwest/latest/reqwest/struct.Client.html[reqwest Client] docs. It already implements the tower service.
 
-Great so we have that. We are able to write that. 
+Great so we have that. We are able to write. 
 
 [source, rust]
 ----
@@ -37,25 +38,25 @@ Great so we have that. We are able to write that.
 
 ----
 
-This compiles but it doesn't give us much. There are no layers included.
-So let's add a Layer from the `tower-http` crate. 
-
+This compiles but it doesn't give us much. It only uses a *leaf* service. We have seen this before.
+The difference is only that we don't call the `client.send_request` but the `service.call`.
+So far there are no layers included. So let's add a Layer from the `tower-http` crate.
 
 [source,rust]
 ----
  let mut client_service = ServiceBuilder::new()
-        .layer(tower_http::set_header::SetRequestHeaderLayer::appending(
-            HeaderName::from_static("x-test"),
-            HeaderValue::from_static("true"),
-        ))
-        .layer(HttpClientLayer)
-        .service(client.clone());
-
+    .layer(tower_http::set_header::SetRequestHeaderLayer::appending(
+        HeaderName::from_static("x-test"),
+        HeaderValue::from_static("true"),
+    ))
+    .service(client.clone());
 ----
 
-You may have expected it. You get an error at `client_service.call(req)` because the type of the `req` doesn't match the type R of the `SetRequestHeader<R>`.
+You may have expected it. You get an error at `client_service.call(req)` because the type of the `req` doesn't match the type R of the `SetRequestHeader<R>`. We pass a `reqwest::Request`.
+This is consistent with the type inference we have seen before. The first Layer sets the tone.
 
-So you will have to use a `http::Request` but then the `client` doesn't accept it.
+So you will have to use a `http::Request` but then the `reqwest client` doesn't accept it.
+Therefore the `http::Request` must be changed to `reqwest::Request` in the chain.
 The https://docs.rs/tower-reqwest/latest/tower_reqwest/index.html[tower-reqwest] service does exactly that.
 
 You use it as the last Layer before the leaf service to adapt the http Request type to a reqwest Request type.
@@ -82,9 +83,7 @@ async fn adapt_to_reqwest() {
 
     let response = client_service.call(req).await.unwrap();
 
-    println!("response code {}", response.status());
-    println!("response headers {:?}", response.headers());
 }
 ----
-WARNING: link to source
+WARNING: link to source adapt_to_reqwest
 

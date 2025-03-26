@@ -1,12 +1,16 @@
 == What Tower is about
-Tower is mainly about the Tower Service trait. What is this mysterious Service trait?
+Tower is mainly about one trait. The Tower Service trait. What is this mysterious Service trait?
 
 https://docs.rs/tower/latest/tower/index.html#overview[Read about it in the Tower Overview]
 
-A Service `call` function returns a future. Input of this future is a value of some type and it will resolve to the Output of some Type. Very general.
+The documentation states that tower can be used for both server and client. Therefore I want to have a look into both usages.
+
+=== The Service Trait
+The Service Trait is a very general "contract".
+A Service's `call` function returns a future. Input of this future is a value of some type and it will resolve to the Output of some Type.
 
 .Listing Service Trait
-[source, rust]
+[source#listing-service-trait, rust]
 ----
 pub trait Service<Request> {
     type Response;
@@ -23,24 +27,96 @@ pub trait Service<Request> {
 }
 ----
 
-In <<Listing Service Trait>> you see that when you do a `call` you get back a Future. That may include calls to the inner Service's `call` and therefore resolves to a call chain. Of course each Service impl has to implement the call to its inner service for this to work.
+In <<listing-service-trait>> you see that when you do a `call` you get back a Future.
+When implementing the Service trait you can just return a future. One example you can find here
 
-The power comes from this agreed upon convention. If you can write an impl Service that doesn't require anything from its generics (no trait bounds and no concrete types) you can call another service with its generic types.
+WARNING: link to leaf_service()
 
-You can wrap a Service into a Service into a Service and so on and get a Service that will forward some input (called Request) through all the services. All those services must implement the Service trait. The generic types may be bound or concrete what limits the general usage of the Service.
+This is called a leaf service. It doesn't call any other service.
+
+Why would you do this?
+The idea of Tower is that you stick to the convention of the service trait and build a chain of services. Any of these services in the chain
+will not return a result directly like the leaf service did. Instead it will call another service that you don't bind in your code. All you
+request from the service you call is that it implements the Service trait.
+
+Let's have a look at one of those Services. They are called *middleware*.
+https://docs.rs/tower/0.5.2/src/tower/timeout/mod.rs.html#48-70[Timeout Service of Tower crate].
+
+The Timeout Service just uses the Types that its inner Service defines.
+[source,rust]
+----
+impl<S, Request> Service<Request> for Timeout<S>
+where
+    S: Service<Request>,
+    S::Error: Into<crate::BoxError>,
+{
+    type Response = S::Response;
+    type Error = crate::BoxError;
+    type Future = ResponseFuture<S::Future>;
+...
+}
+----
+
+The generics require that the inner Service (S) implements `Service<Request>`.
+The associated types are defined by the inner Service S associated types.
+Only the `S::Error` is in a way relaxed to be able to be boxed. And the Timeout Service itself
+returns a BoxError as you can see.
 
 
-Be aware that the chain has to end somewhere. Like mentioned in the Tower documentation the inner Services are called *middleware*. They call their inner service. The "End Service" that don't wrap any other service are called *leaf services*. 
+Follow the code in
+
+WARNING: link auf simple_service_chain
+
+Here we have a simple leaf service that adds 2 numbers. It is a leaf service that doesn't call any other.
+
+In the code we build a chain of service calls like in the following listing.
+
+[source,rust]
+----
+async fn simple_service_chain() {
+    use std::time::Duration;
+    use tower::timeout::Timeout;
+    use crate::service_trait::Add;
+    use tower::Service;
+
+    let add_service = Add;
+    let mut timeout_service = Timeout::new(add_service, Duration::from_secs(1));
+
+    let result = timeout_service.call((12, 4)).await.unwrap();
+    assert_eq!(result, 16);
+}
+----
+
+What we can see here is that you implement a middleware by calling the inner service (Timeout does this).
+We stay to the Service trait and the Timeout can call our `AddService`. 
+The `call` Future now includes a call to the inner Service's `call` and therefore resolves to a call chain.
+
+Of course to qualify as a middleware Service it has to implement the call to its inner service.
+
+IMPORTANT: The power of Tower comes from this agreed upon convention. If you can write a Service with generics that don't require anything
+from its Input/Output (the Generic Request Parameter and the associated types) you can call any another service.
+Then you have the most generic middleware.
+
+To sum it up.
+You can wrap a Service into a Service into a Service and so on and get a Service that will forward some input (called Request)
+through all the services. All those services must implement the Service trait. The generic types may be bound or concrete what
+limits the general usage of the Service.
+
+The chain has to end somewhere. Like mentioned in the Tower documentation the inner Services are called *middleware*.
+They call their inner service. The "End Service" that don't wrap any other service are called *leaf services*.
 
 It is therefore possible to reuse and stack those middleware Services like a Tower of services with a leaf service at the end.
 
-Notice again that there are not many constraints on the generic types. Only for the returned Future there is a trait bound. That means you are free to have any type as Request type in your Service. More on that later.
+// Notice again that there are not many constraints on the generic types. Only for the returned Future there is a trait bound. That means you are free to have any type as Request type in your Service. More on that later.
 
-Building a stack of services is done with the Tower ServiceBuilder. With it you don't stack services but layers. But layers are factory functions for the corresponding service and the ServiceBuilder builds a stack of those Services.
+We don't have to build this chain like we did in the example code above.
+Building a stack of services is done with the Tower ServiceBuilder. With it you don't stack services but layers. Layers are factory functions for the corresponding service and the ServiceBuilder builds a stack of those Services.
+You build the chain with the `service` or `service_fn` function. This unwraps the ServiceBuilder Stack and builds the chain.
+
+Therefore with every Service there is also a Layer implementation.
 
 The Layer trait `layer` function returns the Service of the Layer
 
-.Listing Layer Trait
 [source, rust]
 ----
 pub trait Layer<S> {
@@ -51,36 +127,49 @@ pub trait Layer<S> {
 }
 ----
 
-A ServiceBuilder is called with a chain of layers and a final service.
-As an example
+The ServiceBuilder is called with a chain of layers and a final service.
+To achieve the same as we did before we can write
 
+.Building a Service with Layers
 [source, rust]
 ----
-let service = ServiceBuilder::new()
-        .layer(LayerA)
-        .layer(LayerB)
-        .service(Service);
+async fn layer_service_chain() {
+    use crate::service_trait::AddService;
+    use std::time::Duration;
+    use tower::{Service, ServiceBuilder, timeout::TimeoutLayer};
 
+    let mut service = ServiceBuilder::new()
+        .layer(TimeoutLayer::new(Duration::from_secs(1)))
+        .service(AddService);
+
+    let result = service.call((12, 4)).await.unwrap();
+    assert_eq!(result, 16);
+}
 ----
 
 
 What do we have until now?
 
-- A Service that wraps another Service or is executing some final operation
-- A Layer for that Service that we can use with ServiceBuilder to easily build a stack of services.
+* A Service
+** that wraps another Service
+** is executing some final operation
+* A Layer for the middleware Service that we can use with ServiceBuilder to easily build a stack of services.
 
-The power comes from the agreed upon Service and Layer trait. When you implement these traits for a Service you can combine it with Tower ServiceBuilder with other layers to a chain. That doesn't sound bad, right? You can reuse Layers already present for your call chain.
+When you implement these traits for a Service you can combine it with Tower ServiceBuilder with other layers to a chain. That doesn't sound bad, right? You can reuse Layers already present for your call chain.
 
 === About the Generic Types of Service
-As there are no trait bounds on the Service trait (except the Future as mentioned) you are free to have `i32` as `Request`. But when you combine your Layer with another Layer of another `Request` type you will have to change the type for calling the inner service of course.
+As there are no trait bounds on the Service trait (except the Future as mentioned) you are free to have `i32` as `Request`. But when you combine your
+Layer with another Layer of another `Request` type you will have to change the type for calling the inner service.
+You will have to do this in your Service implementation.
 
-In a layer chain the first call to a service that defines its types defines the type of the call function of the service. Inside this call chain the types can be converted.
+Notice that in a layer chain the first call to a service that defines its types defines the type of the call function of the service
+that is built by ServiceBuilder.
 
-Of course if you want to do anything with the Request in your service you will have to use concrete types or if possible trait bounds on them.
+If you want to do anything with the Request in your service you will have to use concrete types or if possible trait bounds on them.
 
 That is why there are generic tower layers and there are more concrete implementations.
 
- - the generic Services can be found in the https://docs.rs/tower/latest/tower/index.html#modules[tower crate modules]
+- the generic Services can be found in the https://docs.rs/tower/latest/tower/index.html#modules[tower crate modules]
 - more concrete implementations for `http::Request<B>` Request types are in https://docs.rs/tower-http/latest/tower_http[tower-http crate]
 
 Take a look into some Services of these 2 crates. You will notice that `tower-http` Services are implemented for `http::Request`.
