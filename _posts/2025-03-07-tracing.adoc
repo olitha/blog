@@ -1,6 +1,6 @@
 = Tracing a Distributed System with Rust, OpenTelemetry and Axum
 :imagesdir: {baseurl}/assets/tracing
-:source-highlighter: highlight.js
+:source-highlighter: rouge
 :showtitle:
 :page-navtitle: Tracing a Distributed System with Rust, OpenTelemetry and Axum
 :page-excerpt: Excerpt goes here.
@@ -8,11 +8,8 @@
 :toc:
 
 When you develop a Backend Service in Rust there is great support with the _axum_ crate. What I stumbled upon was the question how can I write a Backend system in Rust that is observable.
-
 This lead me to some journey because I did not really concern myself too much with Observability. This is mostly done with instrumentation by Operations in the Java World.
-
 In Rust of course you cannot change the compiled program anymore.
-
 So I wanted to share things I learned here.
 
 [sidebar]

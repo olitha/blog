@@ -8,6 +8,7 @@ exclude:
 - Gemfile
 - Gemfile.lock
 - Rakefile
+highlighter: rouge
 asciidoc: {}
 asciidoctor:
   base_dir: :docdir
@@ -17,4 +18,4 @@ asciidoctor:
     icons: font
     idseparator: _
     stylesdir: css
-    source-highlighter: coderay
+    source-highlighter: rouge
