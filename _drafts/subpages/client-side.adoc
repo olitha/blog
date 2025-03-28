@@ -12,12 +12,12 @@ hyper:: a lower level http library for client and server
 
 Therefore I will have a look how to achieve that for these 2 crates.
 
-What we need to achieve is to build a "Tower" with a leaf service of the client in the end.
+Now we know that to achieve that we build a "Tower" with a leaf service of the client in the end.
 
 === How to use Tower layers with reqwest
 
 What we need is a leaf service that can execute reqwest requests. Oh wait that's easy icon:smile-o[]
-If you take a good look at the https://docs.rs/reqwest/latest/reqwest/struct.Client.html[reqwest Client] docs. It already implements the tower service.
+If you take a closer look at the https://docs.rs/reqwest/latest/reqwest/struct.Client.html[reqwest Client] docs. It already implements the tower service.
 
 Great so we have that. We are able to write. 
 
@@ -44,16 +44,26 @@ So far there are no layers included. So let's add a Layer from the `tower-http` 
 
 [source,rust]
 ----
- let mut client_service = ServiceBuilder::new()
-    .layer(tower_http::set_header::SetRequestHeaderLayer::appending(
-        HeaderName::from_static("x-test"),
-        HeaderValue::from_static("true"),
-    ))
-    .service(client.clone());
+let mut client_service = ServiceBuilder::new()
+   .layer(tower_http::set_header::SetRequestHeaderLayer::appending(
+      HeaderName::from_static("x-test"),
+      HeaderValue::from_static("true"),
+   ))
+   .service(client.clone());
+
+let req = http::request::Builder::new()
+        .method(http::Method::GET)
+        // ...
+        .unwrap();
+
+let response = client_service.call(req).await.unwrap();
 ----
 
-You may have expected it. You get an error at `client_service.call(req)` because the type of the `req` doesn't match the type R of the `SetRequestHeader<R>`. We pass a `reqwest::Request`.
-This is consistent with the type inference we have seen before. The first Layer sets the tone.
+You may have expected it. You get an error at `client_service.call(req)` because the type of the `req`
+doesn't fulfill the trait bounds of type S in `SetRequestHeader<S, _>`. We pass a `reqwest::Request`
+but trait bound for S is `S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>` (https://docs.rs/tower-http/latest/tower_http/set_header/struct.SetRequestHeader.html#impl-Service%3CRequest%3CReqBody%3E%3E-for-SetRequestHeader%3CS,+M%3E[impl Service]).
+
+The first Layer sets the tone.
 
 So you will have to use a `http::Request` but then the `reqwest client` doesn't accept it.
 Therefore the `http::Request` must be changed to `reqwest::Request` in the chain.
@@ -73,7 +83,7 @@ async fn adapt_to_reqwest() {
             HeaderValue::from_static("true"),
         ))
         .layer(HttpClientLayer)
-        .service(client.clone());
+        .service(client);
 
     let req = http::request::Builder::new()
         .method(http::Method::GET)
@@ -85,5 +95,80 @@ async fn adapt_to_reqwest() {
 
 }
 ----
-WARNING: link to source adapt_to_reqwest
+https://github.com/olitha/rust-examples/blob/main/tower/src/tower_reqwest.rs[Example code]
+
+=== Using Tower with Hyper
+
+Let see how this works with hyper.
+Hyper distinguishes between http1 and http2. For both You have a sending side that is
+
+* https://docs.rs/hyper/latest/hyper/client/conn/http1/struct.SendRequest.html[SendRequest http1] 
+* https://docs.rs/hyper/latest/hyper/client/conn/http2/struct.SendRequest.html[SendRequest http2]
+
+Unfortunately the `SendRequest` doesn't implement the Tower service (yet https://github.com/hyperium/hyper/issues/1782).
+
+We can implement it
+
+[source,rust]
+----
+#[derive(Clone)]
+struct HyperService<SendRequestType> {
+    sender: SendRequestType,
+}
+
+impl<B> Service<hyper::Request<B>> for HyperService<http1::SendRequest<B>>
+where
+    B: Body + Send + Unpin + 'static,
+{
+    type Response = http::Response<hyper::body::Incoming>;
+    type Error = hyper::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: hyper::Request<B>) -> Self::Future {
+        let future = self.sender.send_request(req);
+        Box::pin(future)
+    }
+}
+----
+
+Really I don't know if this is the best we can do. but it is the best I can do at the moment.
+Some remarks
+
+* I created 2 implementations, one for http1 and another for http2. The listing shows the http1 impl.
+* the `SendRequest.send_request` returns an opaque type. Therefore I have to put the future on the heap. This could be changed
+  in hyper in the future.
+
+Let's do the same experiment like we did with reqwest.
+Build a Tower Service stack and call it. I left out some parts
+you can look at the code https://github.com/olitha/rust-examples/blob/main/tower/src/tower_hyper.rs[here]
+
+[source, rust]
+----
+
+let (send_request, connection) = http1::handshake(adapt_stream).await?;
+let service = HyperService::new(send_request);
+let mut client_service = ServiceBuilder::new()
+   .layer(SetRequestHeaderLayer::appending(
+      HeaderName::from_static("x-test"),
+      HeaderValue::from_static("true"),
+   ))
+   .service(service);
+
+let url = hyper::Uri::builder()
+// ...
+  
+let request = hyper::Request::builder()
+// ...
+
+let response = client_service.call(request).await?;
+----
+
+That doesn't look too bad icon:smile-o[]
+We are now able to use tower layers both with reqwest client and hyper clients.
+We are getting near to writing a Tower layer to injects tracing headers (the initial motivation of this journey...
+you and me may have lost path icon:road[] but we are back on track)
 

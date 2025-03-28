@@ -7,15 +7,27 @@
 :page-root: ../../../
 :toc:
 
+[abstract]
+****
+The Tower crate is one important building block of e.g. Axum. Other crates like hyper and reqwest are using them as well.
+It is quite clear how to use it on the server side whereas it lacks in my opinion of documentation about using it on the client side.
+My goal was to use the great tower services already present for http calls.
+
+As a start we will get more familiar with it and have a look under the hood.
+Afterwards we will use Tower with reqwest and implement a Tower Service to use it with hyper on the client side. 
+****
+
 If you already developed a Webservice in Rust you surely came across the https://docs.rs/axum/0.8.1/axum[Axum crate].
 The documentation for it is very good and probably you can use it without going too much into the details.
 Axum integrates tightly with the Rust Ecosystem.
 One of those parts that can be easily overlooked (although it is emphasized) is the https://docs.rs/tower/latest/tower/[tower crate].
 The reason it may easily be not paid enough attention to, is that its purpose and benefit may not be clear at first.
-At least it wasn't for me. The benefit becomes clear only in integration with other parts.
+At least it wasn't for me.
+
 
 include::subpages/tower.adoc[]
 include::subpages/server-side.adoc[]
 include::subpages/client-side.adoc[]
+include::subpages/ending.adoc[]
 
 
