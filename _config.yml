@@ -8,6 +8,8 @@ exclude:
 - Gemfile
 - Gemfile.lock
 - Rakefile
+include:
+- google887a8a7a755952ec.html
 highlighter: rouge
 asciidoc: {}
 asciidoctor:
