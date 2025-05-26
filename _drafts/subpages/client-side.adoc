@@ -40,7 +40,7 @@ Great so we have that. We are able to write.
 
 This compiles but it doesn't give us much. It only uses a *leaf* service. We have seen this before.
 The difference is only that we don't call the `client.send_request` but the `service.call`.
-So far there are no layers included. So let's add a Layer from the `tower-http` crate.
+So far there are no layers in between. So let's add a Layer from the `tower-http` crate.
 
 [source,rust]
 ----
@@ -139,7 +139,7 @@ Really I don't know if this is the best we can do. but it is the best I can do a
 Some remarks
 
 * I created 2 implementations, one for http1 and another for http2. The listing shows the http1 impl.
-* the `SendRequest.send_request` returns an opaque type. Therefore I have to put the future on the heap. This could be changed
+* the `SendRequest.send_request` returns an opaque type. Therefore I have to put the future on the heap (box it). This could be changed
   in hyper in the future.
 
 Let's do the same experiment like we did with reqwest.

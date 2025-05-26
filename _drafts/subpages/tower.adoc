@@ -28,7 +28,7 @@ pub trait Service<Request> {
 ----
 
 In <<listing-service-trait>> you see that when you do a `call` you get back a Future.
-When implementing the Service trait you can just return a future.
+When implementing the Service trait you can just return a future built with an async function.
 One example for a service that adds 2 numbers could look like this. Yes this service is not really useful but
 let's try that. 
 
@@ -193,9 +193,8 @@ As there are no trait bounds on the Service trait (except the Future as mentione
 Layer with another Layer of another `Request` type you will have to change the type for calling the inner service.
 You will have to do this in your Service implementation.
 
-Notice that in a layer chain the first call to a service (i.e. the first `layer` call) that defines its types defines
-the type of the call function of the service
-that is built by ServiceBuilder.
+Notice that in a layer chain the first call to a service (i.e. the first `layer` call) defines
+the type of the call function of the service that is built by ServiceBuilder.
 
 If you want to do anything with the Request in your service you will have to use concrete types or if possible trait bounds on them.
 
